@@ -1,8 +1,7 @@
 // Lafi Haneef Mulakkal 251ADB120
 // https://github.com/lafi404-dev/cal-lab-home
 // Compile with: gcc -O2 -Wall -Wextra -std=c17 -o calc calc.c -lm
-// Resources used: course assignment; ChatGPT (OpenAI), conversation history: TO BE PROVIDED BEFORE SUBMISSION.
-
+// Resources used: course assignment; ChatGPT (OpenAI), conversation history: https://chatgpt.com/share/6add3011-b14c-83eb-982b-4eb28d7ae81e
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
