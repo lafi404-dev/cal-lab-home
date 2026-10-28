@@ -16,8 +16,7 @@
  * tokenizer source and requests for the next implementation steps.
  * ChatGPT helped generate the tokenizer, evaluator, file processing,
  * CLI, comments and tests. This assistance must remain disclosed.
- * Before submission, replace the history placeholder above with an
- * actual shared-conversation link or a repository transcript path.
+ * Conversation history is linked in the resources header above.
  */
 
 typedef enum {
@@ -44,6 +43,7 @@ typedef struct {
     size_t index;
     size_t offset;
     Token token;
+    int allocation_failed;
 } Parser;
 
 /* AI (ChatGPT): tokenizer assistance based on the assignment supplied
@@ -225,20 +225,66 @@ Value parse_primary(Parser *p, size_t *error) {
     return result;
 }
 
+/* AI (ChatGPT): prompt "check it carefully, am i doen?"
+ * Stress testing found that recursive exponent chains can exhaust the
+ * call stack. Store pending powers on a heap stack instead, then reduce
+ * from right to left. Parentheses still use the bounded grammar recursion.
+ */
 Value parse_power(Parser *p, size_t *error) {
-    Value left = parse_primary(p, error);
-    if (*error == 0 && p->token.kind == TOK_POWER) {
+    typedef struct {
+        Value left;
+        size_t operator_position;
+        size_t right_position;
+    } PendingPower;
+
+    Value value = parse_primary(p, error);
+    PendingPower *pending = NULL;
+    size_t count = 0, capacity = 0;
+
+    while (*error == 0 && p->token.kind == TOK_POWER) {
+        if (count == capacity) {
+            size_t limit = (size_t)-1 / sizeof(*pending);
+            if (capacity > limit / 2) {
+                p->allocation_failed = 1;
+                record_error(error, p->token.position);
+                break;
+            }
+            size_t next = capacity == 0 ? 16 : capacity * 2;
+            if (next > limit) {
+                p->allocation_failed = 1;
+                record_error(error, p->token.position);
+                break;
+            }
+            PendingPower *grown = realloc(pending, next * sizeof(*pending));
+            if (grown == NULL) {
+                p->allocation_failed = 1;
+                record_error(error, p->token.position);
+                break;
+            }
+            pending = grown;
+            capacity = next;
+        }
+
         size_t operator_position = p->token.position;
         next_token(p);
-        size_t right_position = p->token.position;
-        /* Recursing on the right groups a ** b ** c as a ** (b ** c). */
-        Value right = parse_power(p, error);
-        if (*error == 0) {
-            left = apply_operator(TOK_POWER, left, right,
-                                  operator_position, right_position, error);
-        }
+        pending[count++] = (PendingPower){
+            value, operator_position, p->token.position
+        };
+        value = parse_primary(p, error);
     }
-    return left;
+
+    /* The last primary is the innermost exponent. Popping the saved
+     * left operands computes a ** (b ** c), preserving right association
+     * without a C function call for every power in an unbounded line.
+     */
+    while (count > 0 && *error == 0) {
+        PendingPower item = pending[--count];
+        value = apply_operator(TOK_POWER, item.left, value,
+                               item.operator_position, item.right_position,
+                               error);
+    }
+    free(pending);
+    return value;
 }
 
 Value parse_term(Parser *p, size_t *error) {
@@ -284,7 +330,7 @@ Value parse_expr(Parser *p, size_t *error) {
 /*
  * AI assistance: ChatGPT, responding to the arithmetic-parser assignment
  * supplied in this conversation, helped implement file and CLI handling.
- * The final resources header must link the supplied conversation history.
+ * Conversation history is linked in the resources header above.
  */
 #define STUDENT_NAME "lafi"
 #define STUDENT_LASTNAME "mulakkal"
@@ -399,6 +445,7 @@ int process_file(const char *input, const char *outdir) {
             parser.offset = offset;
             next_token(&parser);
             Value result = parse_expr(&parser, &error);
+            if (parser.allocation_failed) failed = 1;
             if (error == 0 && parser.token.kind != TOK_END) {
                 record_error(&error, parser.token.position);
             }
